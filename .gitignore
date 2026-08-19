@@ -4,6 +4,9 @@
 !.env.example
 .claude/
 
+# Local agent instructions
+/AGENTS.md
+
 # Runtime data and uploaded files
 /data/
 **/data/

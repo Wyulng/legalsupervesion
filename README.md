@@ -213,7 +213,6 @@ legalsupervesion/
 ├── data/                        # 运行时数据，不提交
 ├── docker-compose.yml
 ├── .env.example
-├── AGENTS.md                    # 贡献者与代理工作指南
 ├── LICENSE
 └── README.md
 ```
@@ -227,15 +226,6 @@ legalsupervesion/
 - 默认单文件限制为 100 MB，并发模型调用默认限制为 2；高并发使用前应评估 LLM 限流和主机资源。
 - 当前仓库暂不包含自动化测试套件，提交前至少执行 Python 编译检查、Docker 配置检查和人工功能验证。
 - 项目不提供公网在线服务地址；需要使用时请自行在可信环境部署。
-
-## 贡献
-
-提交代码前请阅读 [AGENTS.md](AGENTS.md)，并保持以下原则：
-
-- 使用清晰、简短的命令式提交信息，例如 `fix: ...`、`docs: ...`、`style: ...`。
-- 不提交 `.env`、API Key、上传文件、历史数据、CSV 结果和缓存目录。
-- 涉及前端行为时，说明验证过的桌面端和移动端场景。
-- 涉及 API 时，同步更新本 README 的接口说明。
 
 ## 许可证
 
