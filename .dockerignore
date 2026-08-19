@@ -1,0 +1,27 @@
+# Python 缓存
+**/__pycache__
+**/*.pyc
+**/*.pyo
+
+# 本地环境配置
+.env
+.venv
+venv
+
+# 数据目录（运行时挂载，不打包进镜像）
+data/
+
+# IDE 配置
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.bak
