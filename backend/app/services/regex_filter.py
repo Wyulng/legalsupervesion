@@ -65,25 +65,23 @@ def is_candidate_m1(text: str) -> bool:
         r'公告送达',
         r'公告费',
     ]
-    has_positive = False
-    for pat in positive_patterns:
-        if re.search(pat, text):
-            has_positive = True
-            break
-    if not has_positive:
-        logger.debug(f"[M1 filter] no positive pattern matched")
-        return False
-
     negative_patterns = [
         r'(?:停业|清算|注销|搬迁|债权申报)\s*公告',
         r'公告送达\s*(?:判决书|裁定书)',
     ]
-    for pat in negative_patterns:
-        if re.search(pat, text):
-            logger.debug(f"[M1 filter] matched negative pattern, excluded")
-            return False
-    logger.debug(f"[M1 filter] passed, text_length={len(text)}")
-    return True
+
+    # 负向公告只排除所在事件，不能因为文书其他位置出现注销公告或
+    # 公告送达判决书，就掩盖真实的起诉状/传票公告送达。
+    for clause in re.split(r'[；;。\n]', text):
+        candidate_clause = clause
+        for pat in negative_patterns:
+            candidate_clause = re.sub(pat, '', candidate_clause)
+        if any(re.search(pat, candidate_clause) for pat in positive_patterns):
+            logger.debug(f"[M1 filter] passed, text_length={len(text)}")
+            return True
+
+    logger.debug(f"[M1 filter] no valid positive pattern matched")
+    return False
 
 
 def is_candidate_m5(text: str) -> bool:
@@ -159,28 +157,27 @@ def is_candidate_m10(text: str, case_type: Optional[str] = None) -> bool:
         r'退还.*款', r'返还.*款', r'赔偿.*损失', r'偿还.*借款',
         r'违约金',
     ]
-    has_money = False
-    for pat in money_patterns:
-        if re.search(pat, result_text):
-            has_money = True
-            break
-    if not has_money:
-        logger.debug(f"[M10 filter] no money pattern matched in result")
-        return False
-
     exclude_patterns = [
         r'精神抚慰金',
         r'当庭履行',
         r'即时履行',
         r'已?当庭给付',
     ]
-    for pat in exclude_patterns:
-        if re.search(pat, result_text):
-            logger.debug(f"[M10 filter] excluded by pattern: {pat}")
-            return False
 
-    logger.debug(f"[M10 filter] passed, result_length={len(result_text)}")
-    return True
+    # 逐项判断金钱义务。一个被排除的精神抚慰金或即时履行条款，不应
+    # 掩盖同一主文中其他带期限的金钱给付义务。
+    clauses = [clause for clause in re.split(r'[；;。\n]', result_text) if clause.strip()]
+    for clause in clauses:
+        if not any(re.search(pat, clause) for pat in money_patterns):
+            continue
+        if any(re.search(pat, clause) for pat in exclude_patterns):
+            logger.debug(f"[M10 filter] excluded individual clause: {clause[:80]}")
+            continue
+        logger.debug(f"[M10 filter] passed, result_length={len(result_text)}")
+        return True
+
+    logger.debug(f"[M10 filter] no non-excluded money obligation matched")
+    return False
 
 
 def is_candidate_m3(text: str) -> bool:

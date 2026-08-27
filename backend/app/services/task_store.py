@@ -326,19 +326,16 @@ def process_task_async(task_id: str, file_paths: List[Path]):
         # 处理文件（带进度更新）
         results = process_batch(file_paths, progress_callback=on_file_completed)
 
+        # 先生成 CSV，再一次性发布 completed 状态。否则 SSE 客户端会在
+        # csv_filename 仍为空时关闭连接，导致下载入口缺失。
+        csv_filename = f"batch_{task.task_id}.csv"
+        csv_path = RESULT_DIR / csv_filename
+        save_results_to_csv(results, csv_path)
         with _tasks_lock:
             task.status = TaskStatus.COMPLETED.value
             task.progress = 100
             task.completed = len(results)
             task.results = [r.model_dump() for r in results]
-        _save(task)
-
-        # 同时保存 CSV
-        ts = int(time.time())
-        csv_filename = f"batch_{ts}.csv"
-        csv_path = RESULT_DIR / csv_filename
-        save_results_to_csv(results, csv_path)
-        with _tasks_lock:
             task.csv_filename = csv_filename
         _save(task)
 

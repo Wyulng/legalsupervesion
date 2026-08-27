@@ -13,10 +13,21 @@ logger = logging.getLogger(__name__)
 _llm_semaphore = threading.BoundedSemaphore(LLM_MAX_CONCURRENT)
 
 
-async def _acquire_llm_slot():
-    """获取全局 LLM 并发槽位（跨线程共享）"""
+async def _acquire_llm_slot(timeout: float | None = None) -> bool:
+    """获取全局 LLM 并发槽位，超时或取消时不遗留阻塞线程。"""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _llm_semaphore.acquire)
+    deadline = None if timeout is None else loop.time() + timeout
+
+    while True:
+        if _llm_semaphore.acquire(blocking=False):
+            return True
+        if deadline is not None:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            await asyncio.sleep(min(0.05, remaining))
+        else:
+            await asyncio.sleep(0.05)
 
 
 def _release_llm_slot():
@@ -581,10 +592,8 @@ async def call_llm_with_retry(
 
     # 信号量获取最多等待 60 秒
     acquired = False
-    try:
-        await asyncio.wait_for(_acquire_llm_slot(), timeout=60)
-        acquired = True
-    except asyncio.TimeoutError:
+    acquired = await _acquire_llm_slot(timeout=60)
+    if not acquired:
         logger.error("Semaphore acquire timeout (60s) for LLM request")
         raise ValueError("等待 AI 并发槽位超时（60秒），请稍后重试")
 
@@ -650,24 +659,27 @@ async def call_llm_with_retry(
                     acquired = False
                     wait_time = 2 ** (attempt + 1)
                     await asyncio.sleep(wait_time)
-                    try:
-                        await asyncio.wait_for(_acquire_llm_slot(), timeout=60)
-                        acquired = True
-                    except asyncio.TimeoutError as exc:
-                        raise ValueError("等待 AI 并发槽位超时（60秒），请稍后重试") from exc
+                    acquired = await _acquire_llm_slot(timeout=60)
+                    if not acquired:
+                        raise ValueError("等待 AI 并发槽位超时（60秒），请稍后重试")
                     continue
 
-                # 非限流错误且已是最后一轮：兜底修复
-                if attempt >= max_retries:
+                if attempt < max_retries:
                     logger.warning(
-                        f"LLM call error on final attempt for {schema_name}: {error_str}, "
-                        f"using validate_and_repair fallback"
+                        f"LLM call error (attempt {attempt+1}/{max_retries+1}) for "
+                        f"{schema_name}: {error_str}; retrying with stricter prompt"
                     )
-                    result = validate_and_repair(last_result, schema_name)
-                    result["_parse_fallback"] = True
-                    return result
+                    prompt = prompt + retry_hint
+                    await asyncio.sleep(0.5)
+                    continue
 
-                raise
+                logger.warning(
+                    f"LLM call error on final attempt for {schema_name}: {error_str}, "
+                    f"using validate_and_repair fallback"
+                )
+                result = validate_and_repair(last_result, schema_name)
+                result["_parse_fallback"] = True
+                return result
     finally:
         if acquired:
             _release_llm_slot()

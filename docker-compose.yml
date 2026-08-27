@@ -14,7 +14,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL}
       - MODEL_NAME=${MODEL_NAME}
       - DEBUG_LOG=${DEBUG_LOG:-false}
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --graceful-timeout 60
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 60
 
   frontend:
     image: nginx:alpine

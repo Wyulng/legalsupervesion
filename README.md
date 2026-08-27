@@ -145,6 +145,13 @@ Python 语法检查：
 python -m compileall -q backend/app
 ```
 
+运行后端回归测试：
+
+```bash
+cd backend
+python -m unittest discover -s tests -v
+```
+
 ## 配置说明
 
 配置模板位于 `.env.example`。不要提交真实 `.env`、API Key 或判决书文件。
@@ -224,7 +231,7 @@ legalsupervesion/
 - API Key 只通过环境变量注入，不要写入代码、README、日志或 Git 历史。
 - `CORS_ORIGINS=*` 适合本地快速启动；如果前后端分离或暴露在受控网络之外，应改为明确的来源列表。
 - 默认单文件限制为 100 MB，并发模型调用默认限制为 2；高并发使用前应评估 LLM 限流和主机资源。
-- 当前仓库暂不包含自动化测试套件，提交前至少执行 Python 编译检查、Docker 配置检查和人工功能验证。
+- 提交前应运行后端回归测试、Python 编译检查和 Docker 配置检查；涉及界面行为时还应完成人工功能验证。
 - 项目不提供公网在线服务地址；需要使用时请自行在可信环境部署。
 
 ## 许可证
