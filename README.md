@@ -22,7 +22,7 @@ An AI-assisted review system for civil judgments. It uses four focused review mo
 其他能力：
 
 - 支持 `.doc`、`.docx`、`.pdf` 和 `.txt` 文件，单文件最大 100 MB。
-- 支持单文件和多文件批量审查。
+- 统一通过批量任务接口审查一个或多个文件。
 - SSE 实时进度推送，连接异常时自动回退到任务轮询。
 - 结果表格、详情展开、CSV 下载和历史任务管理。
 - Docker Compose 一键启动，前端无需构建链。
@@ -66,7 +66,7 @@ Nginx 静态前端 ── /review/* ──> FastAPI 后端
 | --- | --- |
 | 前端 | 单页 HTML、原生 JavaScript、CSS、Nginx |
 | 后端 | Python 3.11、FastAPI、Uvicorn |
-| 文档解析 | PyMuPDF、python-docx、docx2txt、antiword |
+| 文档解析 | PyMuPDF、python-docx、antiword |
 | 模型调用 | OpenAI Python SDK，兼容 OpenAI 格式的接口 |
 | 数据存储 | 本地 JSON、CSV，Docker 挂载 `data/` |
 | 部署 | Docker、Docker Compose |
@@ -172,8 +172,7 @@ python -m unittest discover -s tests -v
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/health` | 返回服务健康状态 |
-| `POST` | `/review/file` | 上传单个文件并同步返回审查结果 |
-| `POST` | `/review/batch` | 批量上传文件，返回 `task_id` |
+| `POST` | `/review/batch` | 上传一个或多个文件，返回 `task_id` |
 | `GET` | `/review/batch/{task_id}` | 查询批量任务状态和已完成结果 |
 | `GET` | `/review/stream/{task_id}` | 通过 SSE 推送任务状态和进度 |
 | `GET` | `/review/download/{filename}` | 下载生成的 CSV 结果 |
@@ -210,7 +209,6 @@ legalsupervesion/
 │   │   ├── config.py            # 项目根目录、数据目录和环境变量
 │   │   ├── models/              # Pydantic 数据模型
 │   │   ├── services/            # 解析、LLM 调用、过滤和任务存储
-│   │   └── utils/
 │   ├── dockerfile               # 后端镜像定义
 │   ├── requirements.txt
 │   └── run.py                   # 本地后端入口

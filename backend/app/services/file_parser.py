@@ -1,5 +1,4 @@
 import subprocess
-import os
 import logging
 from pathlib import Path
 from docx import Document
@@ -198,26 +197,19 @@ def read_txt(file_path: Path) -> str:
 
 def read_doc(file_path: Path) -> str:
     """
-    读取 .doc 文件，采用多级兜底策略。
+    读取 .doc 文件，采用轻量级双层兜底策略。
 
-    解析链（按优先级）：catdoc → antiword → textract → python-ole
+    解析链（按优先级）：antiword → python-ole
     所有解析器失败后抛出 DocParseError，绝不使用 GBK 二进制兜底。
 
     Raises:
         DocParseError: 所有解析器均失败时抛出
     """
-    # 超时控制辅助导入
-    try:
-        from func_timeout import func_timeout, FunctionTimedOut
-        HAS_TIMEOUT = True
-    except ImportError:
-        HAS_TIMEOUT = False
-
     attempted = []
 
     def _try_decode(raw: bytes) -> str:
         """
-        尝试多种编码解析 antiword / catdoc 的原始输出。
+        尝试多种编码解析 antiword 的原始输出。
         优先尝试 UTF-8（Git Bash 环境），再尝试 GBK/GB18030。
         返回解码后的字符串；若全部失败则返回空。
         """
@@ -234,30 +226,7 @@ def read_doc(file_path: Path) -> str:
                 pass
         return ""
 
-    # ── 优先级1：catdoc ──────────────────────────────────────────
-    try:
-        result = subprocess.run(
-            ['catdoc', '-s', 'cp1252', '-d', 'utf-8', str(file_path)],
-            capture_output=True, timeout=30
-        )
-        text = _try_decode(result.stdout)
-        if result.returncode == 0 and len(text.strip()) > 50:
-            logger.debug(f"[catdoc] succeeded for {file_path}")
-            return text.strip()
-        else:
-            logger.debug(
-                f"[catdoc] failed for {file_path}, "
-                f"returncode={result.returncode}, stdout_len={len(result.stdout) if result.stdout else 0}"
-            )
-            attempted.append('catdoc')
-    except FileNotFoundError:
-        logger.debug(f"[catdoc] not found for {file_path}")
-        attempted.append('catdoc (not available)')
-    except subprocess.TimeoutExpired:
-        logger.debug(f"[catdoc] timeout for {file_path}")
-        attempted.append('catdoc (timeout)')
-
-    # ── 优先级2：antiword ────────────────────────────────────────
+    # ── 优先级1：antiword ────────────────────────────────────────
     try:
         result = subprocess.run(
             ['antiword', '-t', '-w', '0', str(file_path)],
@@ -280,32 +249,7 @@ def read_doc(file_path: Path) -> str:
         logger.debug(f"[antiword] timeout for {file_path}")
         attempted.append('antiword (timeout)')
 
-    # ── 优先级3：textract（可选） ────────────────────────────────
-    try:
-        import textract
-        def _run_textract():
-            return textract.process(str(file_path), method='doc').decode('utf-8')
-        if HAS_TIMEOUT:
-            text = func_timeout(30, _run_textract)
-        else:
-            text = _run_textract()
-        if len(text.strip()) > 50:
-            logger.debug(f"[textract] succeeded for {file_path}")
-            return text.strip()
-        else:
-            logger.debug(f"[textract] output too short for {file_path}")
-            attempted.append('textract')
-    except ImportError:
-        logger.debug(f"[textract] not installed for {file_path}")
-        attempted.append('textract (not available)')
-    except (FunctionTimedOut, TimeoutError, subprocess.TimeoutExpired):
-        logger.debug(f"[textract] timeout for {file_path}")
-        attempted.append('textract (timeout)')
-    except Exception as e:
-        logger.debug(f"[textract] failed for {file_path}: {e}")
-        attempted.append('textract (failed)')
-
-    # ── 优先级4：python-ole 兜底 ────────────────────────────────
+    # ── 优先级2：python-ole 兜底 ────────────────────────────────
     try:
         text = _extract_text_from_ole(str(file_path))
         if len(text.strip()) > 50:

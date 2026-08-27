@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 
 
 class ReviewResult(BaseModel):
@@ -38,8 +38,3 @@ class ReviewResult(BaseModel):
     model3_actual_time_type: Optional[str] = Field(None, description="实然解除时间类型（从判决书提取）")
     model3_time_type_match: Optional[bool] = Field(None, description="应然与实然时间类型是否一致")
     model3_reason_match: Optional[bool] = Field(None, description="推理理由与判决书理由是否一致")
-
-
-class BatchReviewResponse(BaseModel):
-    total: int
-    results: List[ReviewResult]

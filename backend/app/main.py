@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Thread
 from typing import List, Optional, Callable
-from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +17,13 @@ from app.logging_config import setup_logging
 setup_logging()
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import UPLOAD_DIR, RESULT_DIR
-from .models.schemas import ReviewResult, BatchReviewResponse
+from .models.schemas import ReviewResult
 from .services.file_parser import parse_file
 from .services.regex_filter import is_candidate_m1, is_candidate_m5, is_candidate_m10, is_candidate_m3
-from .services.llm_client import FUNCTION_SCHEMAS
-from .services.rag_store import RagStore
 from .services.task_store import create_task, get_task, process_task_async, TaskStatus
 from .services.llm_caller import LLMCaller
 
@@ -35,7 +32,6 @@ app = FastAPI(title="法律监督模型API", description="针对民事判决书�
 
 # ---------- 配置 CORS ----------
 # 根据环境选择允许的来源
-import os
 _allowed_origins = os.environ.get("CORS_ORIGINS", "*").split(",") if os.environ.get("CORS_ORIGINS") else ["*"]
 app.add_middleware(
     CORSMiddleware,
@@ -44,9 +40,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-rag = RagStore()
-
 
 # ---------- 优雅停机 ----------
 # 通过 uvicorn 生命周期钩子处理 SIGTERM
@@ -600,34 +593,6 @@ def save_results_to_csv(results: List[ReviewResult], csv_path: Path):
 async def health_check():
     return {"status": "ok"}
 
-@app.post("/review/file", response_model=ReviewResult, tags=["审查"])
-async def review_single_file(file: UploadFile = File(...)):
-    """上传单个判决书文件，返回审查结果"""
-    # 服务端文件大小校验（最大 100MB）
-    MAX_SIZE = 100 * 1024 * 1024
-    file.file.seek(0, 2)
-    size = file.file.tell()
-    file.file.seek(0)
-    if size > MAX_SIZE:
-        raise HTTPException(status_code=413, detail=f"文件过大，最大支持 100MB")
-    file_path = _create_upload_path(file.filename)
-    try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        _cleanup_upload_path(file_path)
-        raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
-
-    try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, process_single_file, file_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"审查失败: {str(e)}")
-    finally:
-        _cleanup_upload_path(file_path)
-
-    return result
-
 @app.post("/review/batch", tags=["审查"])
 async def review_batch_files(files: List[UploadFile] = File(...)):
     """
@@ -711,7 +676,6 @@ async def stream_task(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
 
     from app.services.task_store import create_sse_signal, close_sse_signal, get_sse_signal, clear_sse_signal, get_task_logs
-    from fastapi.responses import StreamingResponse
     from app.logging_config import DEBUG_LOG_ENABLED
 
     evt = get_sse_signal(task_id)
@@ -925,42 +889,3 @@ async def clear_history():
     """清除全部历史记录"""
     count = clear_all_history()
     return {"success": True, "deleted_count": count}
-
-
-@app.get("/", response_class=HTMLResponse, tags=["UI"])
-async def root():
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>法律监督模型</title>
-        <meta charset="utf-8">
-        <style>
-            body { font-family: Arial, sans-serif; margin: 2em; }
-            input, button { margin: 0.5em 0; padding: 0.5em; }
-            .result { white-space: pre-wrap; background: #f0f0f0; padding: 1em; margin-top: 1em; }
-        </style>
-    </head>
-    <body>
-        <h1>法律监督模型 - 民事判决书审查</h1>
-        <p>支持模型：M1(公告费问题) | M5(诉讼费直接支付) | M10(加倍利息缺失) | M3(合同解除时间认定)</p>
-        <input type="file" id="fileInput" multiple />
-        <button onclick="upload()">上传并审查</button>
-        <div id="result" class="result"></div>
-        <script>
-            async function upload() {
-                const files = document.getElementById('fileInput').files;
-                if (files.length === 0) return;
-                const formData = new FormData();
-                for (let i = 0; i < files.length; i++) {
-                    formData.append('files', files[i]);
-                }
-                const response = await fetch('/review/batch', { method: 'POST', body: formData });
-                const data = await response.json();
-                document.getElementById('result').innerHTML = JSON.stringify(data, null, 2);
-            }
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)

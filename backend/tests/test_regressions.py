@@ -3,10 +3,11 @@ import threading
 import unittest
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from app.services import llm_client, task_store
+from app.services import file_parser, llm_client, task_store
 from app.services.regex_filter import is_candidate_m1, is_candidate_m10
 
 
@@ -110,6 +111,36 @@ class TaskStoreRegressionTests(unittest.TestCase):
 
         with task_store._tasks_lock:
             task_store._tasks.pop(task.task_id, None)
+
+
+class LightweightCoreRegressionTests(unittest.TestCase):
+    def test_api_keeps_batch_history_and_debug_stream_only(self):
+        from app.main import app
+
+        paths = {route.path for route in app.routes}
+        self.assertIn("/review/batch", paths)
+        self.assertIn("/review/stream/{task_id}", paths)
+        self.assertIn("/review/history", paths)
+        self.assertNotIn("/review/file", paths)
+        self.assertNotIn("/", paths)
+
+    def test_doc_files_still_dispatch_to_legacy_parser(self):
+        parsed_text = "判决书内容" * 20
+        with patch.object(file_parser, "read_doc", return_value=parsed_text) as read_doc:
+            result = file_parser.parse_file(Path("保留支持.doc"))
+
+        self.assertEqual(parsed_text, result)
+        read_doc.assert_called_once_with(Path("保留支持.doc"))
+
+    def test_doc_parser_keeps_antiword_as_primary_path(self):
+        parsed_text = "人民法院民事判决书" * 10
+        completed = SimpleNamespace(returncode=0, stdout=parsed_text.encode("utf-8"))
+
+        with patch.object(file_parser.subprocess, "run", return_value=completed) as run:
+            result = file_parser.read_doc(Path("传统格式.doc"))
+
+        self.assertEqual(parsed_text, result)
+        self.assertEqual("antiword", run.call_args.args[0][0])
 
 
 if __name__ == "__main__":

@@ -193,7 +193,7 @@ def is_candidate_m3(text: str) -> bool:
     if not reason_text or not result_text:
         return False
 
-    # 使用与 m3_analyzer.py 中 m3_step2_screen() 一致的宽松 article 匹配模式
+    # 使用宽松的法条编号匹配模式，兼容中文数字和 OCR 变体。
     article_patterns = [
         r'第五百六十三条',
         r'第五百六十五条',
@@ -232,7 +232,7 @@ def is_candidate_m3(text: str) -> bool:
         logger.debug(f"[M3初筛] 裁判理由中未匹配到563/565条文")
         return False
 
-    # 使用与 m3_analyzer.py 中 m3_step2_screen() 一致的宽松匹配模式
+    # 使用宽松的解除时间匹配模式，兼容常见裁判主文表达。
     dissolution_patterns = [
         r'解除',
         r'解除合同',
