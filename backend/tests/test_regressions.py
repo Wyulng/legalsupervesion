@@ -9,6 +9,9 @@ from unittest.mock import patch
 
 from app.services import file_parser, llm_client, task_store
 from app.services.regex_filter import is_candidate_m1, is_candidate_m10
+from app.services.m10_rules import extract_judgment_date, extract_m10_article_refs, resolve_m10_law_context
+from app.services.llm_caller import LLMCaller
+from app.services.section_assembler import check_m10_skip_condition
 
 
 class RegexFilterRegressionTests(unittest.TestCase):
@@ -36,6 +39,127 @@ class RegexFilterRegressionTests(unittest.TestCase):
             "二、赔偿精神抚慰金1000元。"
         )
         self.assertTrue(is_candidate_m10(text))
+
+
+class M10LawVersionRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _judgment(result: str, date_text: str | None = "2024年5月1日") -> str:
+        suffix = ""
+        if date_text:
+            suffix = f"\n审判员 张三\n{date_text}"
+        return f"人民法院民事判决书\n判决如下：{result}{suffix}"
+
+    def test_judgment_date_is_read_from_signature(self):
+        text = self._judgment("被告应于判决生效后十日内支付原告货款10000元。", "二〇二四年五月一日")
+        self.assertEqual("2024-05-01", extract_judgment_date(text).isoformat())
+
+    def test_2017_version_uses_article_253(self):
+        text = self._judgment(
+            "被告应于判决生效后十日内支付原告货款10000元，依据《民事诉讼法》第二百五十三条加倍支付迟延履行期间的债务利息。",
+            "2021年12月31日",
+        )
+        result = check_m10_skip_condition(text)
+        self.assertEqual("无问题", result["issue"])
+        self.assertEqual(253, resolve_m10_law_context(text).article)
+
+    def test_2021_version_uses_article_260(self):
+        text = self._judgment(
+            "被告应于判决生效后十日内支付原告货款10000元，依据《民事诉讼法》第260条加倍支付迟延履行期间的债务利息。",
+            "2022年6月1日",
+        )
+        result = check_m10_skip_condition(text)
+        self.assertEqual("无问题", result["issue"])
+        self.assertEqual(260, resolve_m10_law_context(text).article)
+
+    def test_2023_version_uses_article_264(self):
+        text = self._judgment(
+            "被告应于判决生效后十日内支付原告货款10000元，依据《民事诉讼法》第264条加倍支付迟延履行期间的债务利息。",
+            "2024年5月1日",
+        )
+        result = check_m10_skip_condition(text)
+        self.assertEqual("无问题", result["issue"])
+        self.assertEqual(264, resolve_m10_law_context(text).article)
+
+    def test_known_date_with_wrong_article_is_a_problem(self):
+        text = self._judgment(
+            "被告应于判决生效后十日内支付原告货款10000元，依据《民事诉讼法》第253条加倍支付迟延履行期间的债务利息。",
+            "2024年5月1日",
+        )
+        result = check_m10_skip_condition(text)
+        self.assertEqual("存在问题", result["issue"])
+        self.assertEqual("中", result["risk"])
+
+    def test_unknown_date_always_requires_manual_review(self):
+        for clause in (
+            "依据《民事诉讼法》第253条加倍支付迟延履行期间的债务利息。",
+            "依据《民事诉讼法》第260条加倍支付迟延履行期间的债务利息。",
+            "依据《民事诉讼法》第264条加倍支付迟延履行期间的债务利息。",
+            "加倍支付迟延履行期间的债务利息。",
+        ):
+            with self.subTest(clause=clause):
+                result = check_m10_skip_condition(self._judgment(
+                    f"被告应于判决生效后十日内支付原告货款10000元，{clause}",
+                    None,
+                ))
+                self.assertEqual("待人工复核", result["issue"])
+                self.assertEqual("人工复核", result["risk"])
+                self.assertEqual("核对裁判日期及适用法律版本", result["suggestion"])
+
+    def test_unknown_date_does_not_send_m10_to_llm(self):
+        text = self._judgment(
+            "被告应于判决生效后十日内支付原告货款10000元，并加倍支付迟延履行期间的债务利息。",
+            None,
+        )
+        with patch("app.services.llm_caller.call_llm_with_retry", side_effect=AssertionError("LLM should not run")):
+            _, status, data = asyncio.run(LLMCaller("m10").call(text))
+        self.assertEqual("skipped", status)
+        self.assertEqual("待人工复核", data["issue"])
+
+    def test_multiple_signature_dates_require_manual_review(self):
+        text = (
+            "人民法院民事判决书\n判决如下：被告支付原告货款10000元。\n"
+            "审判员 张三\n2024年5月1日\n书记员 李四\n2024年5月2日"
+        )
+        self.assertIsNone(extract_judgment_date(text))
+        self.assertEqual("待人工复核", check_m10_skip_condition(text)["issue"])
+
+    def test_article_506_alone_is_not_compliant(self):
+        text = self._judgment(
+            "被告应于判决生效后十日内支付原告货款10000元，按照《民诉法解释》第506条确定起算时间。",
+        )
+        result = check_m10_skip_condition(text)
+        self.assertEqual("存在问题", result["issue"])
+
+    def test_same_number_from_another_law_is_not_m10_article(self):
+        self.assertEqual([], extract_m10_article_refs("《民法典》第264条规定其他事项。"))
+
+    def test_ordinary_interest_lpr_and_delayed_payment_penalty_continue_to_llm(self):
+        cases = (
+            "被告应于判决生效后十日内支付原告货款10000元，逾期按年利率4%支付利息。",
+            "被告应于判决生效后十日内支付原告货款10000元，逾期按LPR支付利息。",
+            "被告应于判决生效后十日内支付原告货款10000元，逾期支付迟延履行金。",
+            "被告应于判决生效后三十日内交付房屋，逾期支付迟延履行金500元。",
+        )
+        for clause in cases:
+            with self.subTest(clause=clause):
+                self.assertIsNone(check_m10_skip_condition(self._judgment(clause)))
+
+    def test_behavior_only_does_not_trigger_m10_candidate(self):
+        text = self._judgment("被告应于判决生效后三十日内将涉案房屋腾空并返还原告。")
+        self.assertFalse(is_candidate_m10(text))
+
+    def test_behavior_and_money_obligations_are_kept_as_m10_candidate(self):
+        text = self._judgment(
+            "一、被告应于判决生效后三十日内交付房屋；二、被告应于判决生效后十日内支付原告货款10000元。"
+        )
+        self.assertTrue(is_candidate_m10(text))
+
+    def test_behavior_clause_interest_does_not_hide_money_clause(self):
+        text = self._judgment(
+            "一、被告应于判决生效后三十日内交付房屋，并加倍支付迟延履行期间的债务利息；"
+            "二、被告应于判决生效后十日内支付原告货款10000元。"
+        )
+        self.assertIsNone(check_m10_skip_condition(text))
 
     def test_m10_excludes_emotional_damages_only(self):
         self.assertFalse(is_candidate_m10("判决如下：被告赔偿原告精神抚慰金1000元。"))

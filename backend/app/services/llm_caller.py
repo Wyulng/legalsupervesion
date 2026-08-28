@@ -11,6 +11,7 @@ from .section_assembler import (
     check_special_m1,
     check_m10_skip_condition,
 )
+from .m10_rules import resolve_m10_law_context
 from .llm_client import call_llm_with_retry, FUNCTION_SCHEMAS
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ class LLMCaller:
             }
 
         # 步骤2：组装 prompt
-        prompt = self._build_prompt(sections)
+        prompt = self._build_prompt(sections, full_text)
         if prompt is None:
             logger.debug(f"[LLMCaller.{self.model_name}] prompt build failed")
             return self.model_name, "prompt_error", {"error": f"Prompt build failed for model: {self.model_name}"}
@@ -92,7 +93,7 @@ class LLMCaller:
             logger.exception(f"[LLMCaller.{self.model_name}] unexpected error")
             return self.model_name, "api_error", {"error": f"模型处理异常: {e}"}
 
-    def _build_prompt(self, sections: Dict[str, str]) -> Optional[str]:
+    def _build_prompt(self, sections: Dict[str, str], full_text: str = "") -> Optional[str]:
         """根据模型名和板块字典组装 prompt，异常时返回 None"""
         try:
             if self.model_name == "m1":
@@ -106,7 +107,10 @@ class LLMCaller:
                 return build_prompt_m5(sections.get("judgment_result", ""))
             elif self.model_name == "m10":
                 from app.main import build_prompt_m10
-                return build_prompt_m10(sections.get("judgment_result", ""))
+                return build_prompt_m10(
+                    sections.get("judgment_result", ""),
+                    law_context=resolve_m10_law_context(full_text),
+                )
             elif self.model_name == "m3":
                 from app.main import build_prompt_m3
                 return build_prompt_m3(
