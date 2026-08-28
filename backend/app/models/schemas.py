@@ -21,7 +21,7 @@ class ReviewResult(BaseModel):
     # ---------- M10 ----------
     model10_candidate: bool = Field(False, description="正则初筛是否命中")
     model10_status: Optional[str] = Field(None, description="处理状态：success/api_error/processing_error/skipped")
-    model10_issue: Optional[str] = Field(None, description="最终结论：存在问题/无问题")
+    model10_issue: Optional[str] = Field(None, description="最终结论：存在问题/无问题/待人工复核")
     model10_reason: Optional[str] = Field(None, description="判断理由，引用原文关键句")
     model10_risk: Optional[str] = Field(None, description="风险等级：高/中/低/人工复核")
     model10_suggestion: Optional[str] = Field(None, description="检察建议，不超过50字")

@@ -143,7 +143,7 @@ def is_candidate_m5(text: str) -> bool:
 
 def is_candidate_m10(text: str, case_type: Optional[str] = None) -> bool:
     """
-    M10初筛：金钱给付义务但未载明加倍支付迟延履行利息。
+    M10初筛：识别需要核对“加倍支付迟延履行期间的债务利息”的金钱给付义务。
     匹配范围：仅限裁判结果段落。
     负向排除：精神抚慰金等非金钱给付义务，以及即时履行情形。
     """
@@ -163,6 +163,12 @@ def is_candidate_m10(text: str, case_type: Optional[str] = None) -> bool:
         r'即时履行',
         r'已?当庭给付',
     ]
+    behavior_only_patterns = [
+        r'(?:交付|返还|腾空).{0,12}(?:房屋|房产|土地|车辆|设备|原物|物品|场地)',
+        r'(?:房屋|房产|土地|车辆|设备|原物|物品|场地).{0,12}(?:交付|返还|腾空)',
+        r'(?:继续履行|恢复原状|排除妨害|协助过户)',
+    ]
+    money_indicators = r'(?:\d+(?:\.\d+)?\s*元|人民币|货款|借款|工程款|本金|款项|费用|损失|违约金|利息|金额|按[^；。\n]{0,20}计算)'
 
     # 逐项判断金钱义务。一个被排除的精神抚慰金或即时履行条款，不应
     # 掩盖同一主文中其他带期限的金钱给付义务。
@@ -172,6 +178,13 @@ def is_candidate_m10(text: str, case_type: Optional[str] = None) -> bool:
             continue
         if any(re.search(pat, clause) for pat in exclude_patterns):
             logger.debug(f"[M10 filter] excluded individual clause: {clause[:80]}")
+            continue
+        # 交付或返还特定物、恢复原状等行为义务不属于 M10 的金钱利息判断。
+        # 同一条款同时出现明确金额或金钱对象时，保留候选交由后续逐项判断。
+        if any(re.search(pat, clause) for pat in behavior_only_patterns) and not re.search(
+            money_indicators, clause
+        ):
+            logger.debug(f"[M10 filter] excluded behavior-only clause: {clause[:80]}")
             continue
         logger.debug(f"[M10 filter] passed, result_length={len(result_text)}")
         return True

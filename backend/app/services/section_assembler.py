@@ -5,7 +5,6 @@
 """
 
 import logging
-import re
 from typing import Dict, List, Optional, Callable
 
 from .section_extractor import (
@@ -14,6 +13,7 @@ from .section_extractor import (
     extract_judgment_result,
     is_dismissal_no_payment,
 )
+from .m10_rules import m10_precheck
 
 logger = logging.getLogger(__name__)
 
@@ -94,28 +94,10 @@ def assemble_sections(full_text: str, model_name: str) -> Dict[str, str]:
 
 def check_m10_skip_condition(full_text: str) -> Optional[Dict]:
     """
-    M10 快速退出条件：裁判结果中已明确载明加倍支付迟延履行利息条款。
-    若命中，返回与 check_special_m1 相同格式的结果字典；否则返回 None。
-    """
-    result_text = extract_judgment_result(full_text)
-    if not result_text:
-        return None
+    M10 确定性前置判断。
 
-    # 合规表述模式：已写明加倍利息或引用法条
-    patterns = [
-        r'加倍支付迟延履行(?:期间)?(?:的)?(?:债务)?利息',
-        r'迟延履行(?:期间)?(?:的)?利息.*?加倍',
-        r'加倍支付迟延履行金',
-        r'《民事诉讼法》\s*第\s*253\s*条',
-        r'《民事诉讼法》\s*第二百五十三条',
-        r'逾期.*?按日万分之五.*?利息',
-    ]
-    for pat in patterns:
-        if re.search(pat, result_text):
-            return {
-                "issue": "无问题",
-                "reason": "裁判结果已明确载明加倍支付迟延履行利息条款",
-                "risk": "低",
-                "status": "skipped",
-            }
-    return None
+    法律版本由文书末尾可确认的裁判落款日期决定；日期无法确认时返回
+    “待人工复核”，法条版本不匹配时返回“存在问题”。无法确定的其他情况
+    返回 None，交由 LLM 按完整上下文分析。
+    """
+    return m10_precheck(full_text)
